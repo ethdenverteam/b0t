@@ -8,6 +8,8 @@ import time
 import logging
 import re
 from datetime import datetime, timedelta
+from flask import Flask
+from threading import Thread
 
 # --- НАСТРОЙКИ ЛОГИРОВАНИЯ ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -849,10 +851,41 @@ def update_menu_command(message):
     set_admin_specific_commands_for_user(chat_id=message.chat.id) # Re-call admin command setter for this user
     bot.send_message(chat_id=message.chat.id, text=r"Меню команд обновлено\. Возможно, потребуется перезапустить официальный клиент Telegram для отображения изменений\.", parse_mode='MarkdownV2')
 
+# --- Flask сервер для Render ---
+def create_flask_app():
+    app = Flask('')
+    
+    @app.route('/')
+    def home():
+        return "🤖 Telegram Bot is running successfully!"
+    
+    @app.route('/health')
+    def health():
+        return "OK", 200
+    
+    return app
 
 # Start polling for messages
 if __name__ == '__main__':
     logging.info("Bot starting...")
+    
+    # Запускаем HTTP сервер для Render
+    port = int(os.environ.get('PORT', 5000))
+    flask_app = create_flask_app()
+    
+    # Запускаем Flask в отдельном потоке
+    server_thread = Thread(target=lambda: flask_app.run(
+        host='0.0.0.0', 
+        port=port, 
+        debug=False, 
+        use_reloader=False
+    ))
+    server_thread.daemon = True
+    server_thread.start()
+    
+    print(f"🤖 HTTP server started on port {port}")
+    print("🚀 Starting Telegram bot...")
+    
     # Set default commands for all users (e.g., just /start)
     set_global_user_commands()
     
