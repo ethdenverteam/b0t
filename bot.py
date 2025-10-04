@@ -8,15 +8,16 @@ import time
 import logging
 import re
 from datetime import datetime, timedelta
-from flask import Flask
-from threading import Thread
+from flask import Flask, request
+import requests
 
 # --- НАСТРОЙКИ ЛОГИРОВАНИЯ ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 # --- /НАСТРОЙКИ ЛОГИРОВАНИЯ ---
 
-# Replace 'YOUR_BOT_TOKEN' with your actual bot token
-bot = telebot.TeleBot('7580417309:AAHrFOMsIJJpbiZWGXN-xi3VET2hQb0xTxU')
+# Бот токен
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '7580417309:AAHrFOMsIJJpbiZWGXN-xi3VET2hQb0xTxU')
+bot = telebot.TeleBot(BOT_TOKEN)
 
 # --- КОНФИГУРАЦИЯ ---
 ADMIN_IDS = [7615679936, 748159294] 
@@ -851,48 +852,58 @@ def update_menu_command(message):
     set_admin_specific_commands_for_user(chat_id=message.chat.id) # Re-call admin command setter for this user
     bot.send_message(chat_id=message.chat.id, text=r"Меню команд обновлено\. Возможно, потребуется перезапустить официальный клиент Telegram для отображения изменений\.", parse_mode='MarkdownV2')
 
-# --- Flask сервер для Render ---
-def create_flask_app():
-    app = Flask('')
-    
-    @app.route('/')
-    def home():
-        return "🤖 Telegram Bot is running successfully!"
-    
-    @app.route('/health')
-    def health():
-        return "OK", 200
-    
-    return app
+# --- Flask сервер для Render с вебхуками ---
+app = Flask(__name__)
 
-# Start polling for messages
+@app.route('/')
+def home():
+    return "🤖 Telegram Bot is running successfully with Webhooks!"
+
+@app.route('/health')
+def health():
+    return "OK", 200
+
+# Webhook endpoint для Telegram
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return ''
+    return 'OK'
+
+# Установка вебхука при запуске
+def set_webhook():
+    webhook_url = f"https://b0t-1rvj.onrender.com/webhook"
+    
+    # Удаляем старый вебхук
+    bot.remove_webhook()
+    time.sleep(1)
+    
+    # Устанавливаем новый вебхук
+    result = bot.set_webhook(url=webhook_url)
+    if result:
+        logging.info(f"Webhook установлен: {webhook_url}")
+    else:
+        logging.error("Ошибка установки вебхука")
+
+# Start Flask server
 if __name__ == '__main__':
-    logging.info("Bot starting...")
+    logging.info("Bot starting with webhooks...")
     
-    # Запускаем HTTP сервер для Render
-    port = int(os.environ.get('PORT', 5000))
-    flask_app = create_flask_app()
-    
-    # Запускаем Flask в отдельном потоке
-    server_thread = Thread(target=lambda: flask_app.run(
-        host='0.0.0.0', 
-        port=port, 
-        debug=False, 
-        use_reloader=False
-    ))
-    server_thread.daemon = True
-    server_thread.start()
-    
-    print(f"🤖 HTTP server started on port {port}")
-    print("🚀 Starting Telegram bot...")
+    # Устанавливаем вебхук
+    set_webhook()
     
     # Set default commands for all users (e.g., just /start)
     set_global_user_commands()
     
     # Also set admin commands for all ADMIN_IDS upon bot startup
-    # This ensures admins have their special commands if the bot restarts.
     for admin_id in ADMIN_IDS:
         set_admin_specific_commands_for_user(chat_id=admin_id)
-        
-    bot.infinity_polling(timeout=30, long_polling_timeout=30) 
+    
+    # Запускаем Flask сервер
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
+    
     logging.info("Bot stopped.")
